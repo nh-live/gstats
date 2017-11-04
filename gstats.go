@@ -3,8 +3,10 @@ package main
 import (
     "fmt"
     "os"
-    // "syscall"
     "net"
+    // "syscall"
+    "bufio"
+    "io"
 )
 
 const (
@@ -22,17 +24,37 @@ func usage() {
 
 // Handles incoming requests.
 func handleRequest(conn net.Conn) {
-    // Make a buffer to hold incoming data.
-    buf := make([]byte, 1024)
-    // Read the incoming connection into the buffer.
-    _, err := conn.Read(buf)
-    if err != nil {
-        fmt.Println("Error reading:", err.Error())
-    }
-    // Send a response back to person contacting us.
-    conn.Write([]byte("Message received."))
     // Close the connection when you're done with it.
-    conn.Close()
+    defer conn.Close()
+    // // Make a buffer to hold incoming data.
+    // buf := make([]byte, 1024)
+    // // Read the incoming connection into the buffer.
+    // _, err := conn.Read(buf)
+    // if err != nil {
+    //     fmt.Println("Error reading:", err.Error())
+    // }
+    // // Send a response back to person contacting us.
+    // conn.Write([]byte("Message received."))
+
+    r := bufio.NewReaderSize(conn, 4096)
+    // DONOT block data processing, keep it go fast.
+    for {
+        buf, _, err := r.ReadLine()
+        if err != nil {
+            if io.EOF != err {
+                fmt.Println("Errs out")
+            }
+            break
+        }
+        // Validate and parse incoming data
+
+        // Feed into data buckets pool
+
+        // Testing Example
+        conn.Write(buf)
+
+        fmt.Println("Processed!")
+    }
 }
 
 func main() {
