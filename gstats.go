@@ -13,7 +13,9 @@ const (
     CONN_HOST = "localhost"
     CONN_PORT = "3333"
     CONN_TYPE = "tcp"
+    UDP_PORT = ":7777"
 )
+
 
 func usage() {
     fmt.Fprintln(
@@ -58,6 +60,7 @@ func handleRequest(conn net.Conn) {
 }
 
 func main() {
+    // TCP
     // Listen for incoming connections.
     l, err := net.Listen(CONN_TYPE, CONN_HOST+":"+CONN_PORT)
     if err != nil {
@@ -77,4 +80,24 @@ func main() {
         // Handle connections in a new goroutine.
         go handleRequest(conn)
     }
+
+
+    // UDP
+    udp_addr, err := net.ResolveUDPAddr("udp", UDP_PORT)
+    if nil != err {
+        fmt.Println("Errs out when resolving udp server.")
+        os.Exit(1)
+    }
+    udp_conn, err := net.ListenUDP("udp", udp_addr)
+
+    defer udp_conn.Close()
+
+    fmt.Println("Listening on " + UDP_PORT)
+    if nil != err {
+        fmt.Println("Errs out when starting udp server.")
+        os.Exit(1)
+    }
+
+    handleRequest(udp_conn)
+    fmt.Println("Going to stop...")
 }
