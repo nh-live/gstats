@@ -35,7 +35,7 @@ func usage() {
 // Metric Types     //
 //////////////////////
 type Counter struct {
-    bucket        time.Duration
+    bucket        string
     c             metrics.Counter
 }
 
@@ -63,7 +63,8 @@ type Meter struct {
 // Data Sink  //
 ////////////////
 type DataSink struct {
-    conn           *net.TCPConn
+    conn               *net.TCPConn
+    flushInterval      time.Duration
     // Needs some more design...
 }
 
