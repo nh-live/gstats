@@ -9,6 +9,7 @@ import (
     "io"
     "time"
     "github.com/rcrowley/goagain"
+    "github.com/rcrowley/go-metrics"
 )
 
 const (
@@ -19,12 +20,61 @@ const (
 )
 
 
+/////////////
+// Usage   //
+/////////////
+
 func usage() {
     fmt.Fprintln(
         os.Stderr,
         "Usage: gstats <path-to-config-file>",
     )
 }
+
+//////////////////////
+// Metric Types     //
+//////////////////////
+type Counter struct {
+    bucket        time.Duration
+    c             metrics.Counter
+}
+
+type Gauge struct {
+
+}
+
+type Registry struct {
+
+}
+
+type Histogram struct {
+
+}
+
+type Timer struct {
+
+}
+
+type Meter struct {
+
+}
+
+////////////////
+// Data Sink  //
+////////////////
+type DataSink struct {
+    conn           *net.TCPConn
+    // Needs some more design...
+}
+
+func (ds *DataSink) sendData() {
+
+}
+
+
+/////////////
+// Server  //
+/////////////
 
 // Accept TCP Conns
 func acceptTCPConn(l *net.TCPListener) {
@@ -74,6 +124,10 @@ func handleRequest(conn net.Conn) {
         fmt.Println("Processed!")
     }
 }
+
+///////////
+// Main  //
+///////////
 
 func main() {
 
