@@ -13,10 +13,15 @@ import (
 )
 
 const (
+    // Server Listening Addr
     CONN_HOST = "localhost"
     CONN_PORT = ":3333"
     CONN_TYPE = "tcp"
     UDP_PORT = ":7777"
+
+    // Backend Server Addr
+    GRAPHITE_HOST = "localhost"
+    GRAPHITE_PORT = ":2003"
 )
 
 /////////////
@@ -50,13 +55,23 @@ type Histogram struct {
 
 }
 
-type bucket struct {
+type Bucket struct {
     couters         map[string]Counter
     gauges          map[string]Gauge
     timers          map[string]Timer
     histograms      map[string]Histogram
-
 }
+
+
+func NewBucket() (*Bucket) {
+    return &Bucket{
+        couters: make(map[string]Counter),
+        gauges: make(map[string]Gauge),
+        timers: make(map[string]Timer),
+        histograms: make(map[string]Histogram),
+    }
+}
+
 
 ////////////////
 // Data Sink  //
@@ -64,15 +79,22 @@ type bucket struct {
 type DataSink struct {
     conn               *net.TCPConn
     flushInterval      time.Duration
-    ticker             time.Ticker
     // Needs some more design...
+    bucket             *Bucket
 }
 
-func (ds *DataSink) handleSendData() {
-    for {
-        select {
+// func NewDataSink(addr string, flushInterval time.Duration) (*DataSink, error) {
+//     return
+// }
 
-        }
+func (ds *DataSink) handleFlush() {
+    // Init a ticker
+    flushTicker := time.NewTicker(ds.flushInterval)
+    for {
+        <- flushTicker.C
+        // Swap and buffer
+        old_buf := ds.bucket
+        ds.bucket = NewBucket()
     }
 }
 
