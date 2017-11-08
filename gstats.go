@@ -19,7 +19,6 @@ const (
     UDP_PORT = ":7777"
 )
 
-
 /////////////
 // Usage   //
 /////////////
@@ -43,7 +42,7 @@ type Gauge struct {
 
 }
 
-type Registry struct {
+type Timer struct {
 
 }
 
@@ -51,11 +50,11 @@ type Histogram struct {
 
 }
 
-type Timer struct {
-
-}
-
-type Meter struct {
+type bucket struct {
+    couters         map[string]Counter
+    gauges          map[string]Gauge
+    timers          map[string]Timer
+    histograms      map[string]Histogram
 
 }
 
@@ -65,13 +64,17 @@ type Meter struct {
 type DataSink struct {
     conn               *net.TCPConn
     flushInterval      time.Duration
+    ticker             time.Ticker
     // Needs some more design...
 }
 
-func (ds *DataSink) sendData() {
+func (ds *DataSink) handleSendData() {
+    for {
+        select {
 
+        }
+    }
 }
-
 
 /////////////
 // Server  //
@@ -131,6 +134,10 @@ func handleRequest(conn net.Conn) {
 ///////////
 
 func main() {
+
+    // TODO:
+    // Parse Config File...
+
 
     // TCP
     // Listen for incoming connections.
