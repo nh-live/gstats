@@ -21,8 +21,14 @@ const (
     UDP_PORT = ":7777"
 
     // Backend Server Addr
-    GRAPHITE_HOST = "localhost"
-    GRAPHITE_PORT = ":2003"
+    GRAPHITE_ADDR = "localhost:2003"
+
+    // Messege types
+    TYPE_KV = "kv"
+    TYPE_COUNTER = "c"
+    TYPE_GAUGE = "g"
+    TYPE_TIMER = "ms"
+    TYPE_HISTOGRAM = "h"
 )
 
 /////////////
@@ -40,7 +46,11 @@ func usage() {
 // Metric Types     //
 //////////////////////
 type Counter struct {
+    count   int
+}
 
+func (c *Counter) inc(num int) {
+    c.count = c.count + num
 }
 
 type Gauge struct {
@@ -55,23 +65,62 @@ type Histogram struct {
 
 }
 
+type KeyValue struct {
+
+}
+
+
+/////////////
+// Bucket  //
+/////////////
 type Bucket struct {
-    couters         map[string]Counter
-    gauges          map[string]Gauge
-    timers          map[string]Timer
-    histograms      map[string]Histogram
+    couters         map[string]*Counter
+    gauges          map[string]*Gauge
+    timers          map[string]*Timer
+    histograms      map[string]*Histogram
+    kvs             map[string]*KeyValue
 }
 
 
 func NewBucket() (*Bucket) {
     return &Bucket{
-        couters: make(map[string]Counter),
-        gauges: make(map[string]Gauge),
-        timers: make(map[string]Timer),
-        histograms: make(map[string]Histogram),
+        couters: make(map[string]*Counter),
+        gauges: make(map[string]*Gauge),
+        timers: make(map[string]*Timer),
+        histograms: make(map[string]*Histogram),
+        kvs: make(map[string]*KeyValue),
     }
 }
 
+func AddCounterSample(bucket *Bucket, key string, val string) {
+    if _, ok := bucket.couters[key]; ok {
+        // Exists
+        bucket.couters[key].inc(1)
+        fmt.Println("Received a Counter (exists)!")
+    } else {
+        // Not Exist
+        bucket.couters[key] = &Counter {
+            count: 1,
+        }
+        fmt.Println("Received a Counter (dont exists)!")
+    }
+}
+
+func AddGaugeSample(bucket *Bucket, key string, val string) {
+
+}
+
+func AddTimerSample(bucket *Bucket, key string, val string) {
+
+}
+
+func AddHistogramSample(bucket *Bucket, key string, val string) {
+
+}
+
+func AddKVSample(bucket *Bucket, key string, val string) {
+
+}
 
 ////////////////
 // Data Sink  //
@@ -83,9 +132,32 @@ type DataSink struct {
     bucket             *Bucket
 }
 
-// func NewDataSink(addr string, flushInterval time.Duration) (*DataSink, error) {
-//     return
-// }
+func NewDataSink(addr string, flushInterval time.Duration) (*DataSink, error) {
+    // Initialize a Conn to backend server
+    tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+    if err != nil {
+        fmt.Println("ResolveTCPAddr failed:", err.Error())
+        os.Exit(1)
+    }
+
+    conn, err := net.DialTCP("tcp", nil, tcpAddr)
+    if err != nil {
+        fmt.Println("Dial failed:", err.Error())
+        os.Exit(1)
+    }
+
+    // Initialize a new Bucket
+    bucket := NewBucket()
+
+    // Initialize Data Sink
+    sink := DataSink{
+        conn: conn,
+        flushInterval: flushInterval,
+        bucket: bucket,
+    }
+
+    return &sink, nil
+}
 
 func (ds *DataSink) handleFlush() {
     // Init a ticker
@@ -124,13 +196,12 @@ func parse(buf []byte) (string, string, string) {
     return key, val, msgType
 }
 
-
 /////////////
 // Server  //
 /////////////
 
 // Accept TCP Conns
-func acceptTCPConn(l *net.TCPListener) {
+func acceptTCPConn(l *net.TCPListener, ds *DataSink) {
     for {
         // Listen for an incoming connection.
         conn, err := l.Accept()
@@ -139,12 +210,12 @@ func acceptTCPConn(l *net.TCPListener) {
             os.Exit(1)
         }
         // Handle connections in a new goroutine.
-        go handleRequest(conn)
+        go handleRequest(conn, ds)
     }
 }
 
 // Handles incoming requests.
-func handleRequest(conn net.Conn) {
+func handleRequest(conn net.Conn, ds *DataSink) {
     // Close the connection when you're done with it.
     defer conn.Close()
     // // Make a buffer to hold incoming data.
@@ -175,6 +246,18 @@ func handleRequest(conn net.Conn) {
         fmt.Println("Type: " + msgType)
 
         // Feed into data buckets pool
+        switch msgType {
+            case TYPE_COUNTER:
+                AddCounterSample(ds.bucket, key, value)
+            case TYPE_HISTOGRAM:
+                AddHistogramSample(ds.bucket, key, value)
+            case TYPE_TIMER:
+                AddTimerSample(ds.bucket, key, value)
+            case TYPE_KV:
+                AddKVSample(ds.bucket, key, value)
+            case TYPE_GAUGE:
+                AddGaugeSample(ds.bucket, key, value)
+        }
 
         fmt.Println("Processed!")
     }
@@ -190,6 +273,9 @@ func main() {
     // Parse Config File...
 
 
+    // Initialize Data Sink
+    dataSink, err := NewDataSink(GRAPHITE_ADDR, 60)
+
     // TCP
     // Listen for incoming connections.
     l, ppid, err := goagain.GetEnvs()
@@ -202,9 +288,9 @@ func main() {
         if nil != err {
             os.Exit(1)
         }
-        go acceptTCPConn(l.(*net.TCPListener))
+        go acceptTCPConn(l.(*net.TCPListener), dataSink)
     } else {
-        go acceptTCPConn(l.(*net.TCPListener))
+        go acceptTCPConn(l.(*net.TCPListener), dataSink)
         if err := goagain.KillParent(ppid); nil != err {
             os.Exit(1)
         }
@@ -234,7 +320,7 @@ func main() {
         os.Exit(1)
     }
 
-    go handleRequest(udp_conn)
+    go handleRequest(udp_conn, dataSink)
 
 
     // Block the main goroutine awaiting signals.
