@@ -8,8 +8,9 @@ import (
     "bufio"
     "io"
     "time"
+    "strings"
     "github.com/rcrowley/goagain"
-    "github.com/rcrowley/go-metrics"
+    // "github.com/rcrowley/go-metrics"
 )
 
 const (
@@ -39,8 +40,7 @@ func usage() {
 // Metric Types     //
 //////////////////////
 type Counter struct {
-    bucket        string
-    c             metrics.Counter
+
 }
 
 type Gauge struct {
@@ -92,11 +92,38 @@ func (ds *DataSink) handleFlush() {
     flushTicker := time.NewTicker(ds.flushInterval)
     for {
         <- flushTicker.C
+        // Time Now
+        now := time.Now()
+        epoch_now := now.Unix()
+        fmt.Println(epoch_now)
+
         // Swap and buffer
-        old_buf := ds.bucket
+        old_bucket := ds.bucket
         ds.bucket = NewBucket()
+
+        // Spawn a goroutine for flushing
+        go flushBucket(old_bucket, ds.conn)
     }
 }
+
+func flushBucket(old_bucket *Bucket, conn *net.TCPConn) {
+
+}
+
+///////////////////////////
+// Parse and Validation  //
+///////////////////////////
+func parse(buf []byte) (string, string, string) {
+    line := string(buf)
+    tmp := strings.Split(line, "|")
+    kv, msgType := tmp[0], tmp[1]
+
+    tmp = strings.Split(kv, ":")
+    key, val := tmp[0], tmp[1]
+
+    return key, val, msgType
+}
+
 
 /////////////
 // Server  //
@@ -140,12 +167,14 @@ func handleRequest(conn net.Conn) {
             }
             break
         }
+
         // Validate and parse incoming data
+        key, value, msgType := parse(buf)
+        fmt.Println("Key: " + key)
+        fmt.Println("Value: " + value)
+        fmt.Println("Type: " + msgType)
 
         // Feed into data buckets pool
-
-        // Testing Example
-        conn.Write(buf)
 
         fmt.Println("Processed!")
     }
@@ -187,6 +216,7 @@ func main() {
             time.Sleep(10 * time.Millisecond)
         }
     }
+    fmt.Println("TCP Listening on " + CONN_PORT)
 
     // UDP
     udp_addr, err := net.ResolveUDPAddr("udp", UDP_PORT)
@@ -198,7 +228,7 @@ func main() {
 
     defer udp_conn.Close()
 
-    fmt.Println("Listening on " + UDP_PORT)
+    fmt.Println("UDP Listening on " + UDP_PORT)
     if nil != err {
         fmt.Println("Errs out when starting udp server.")
         os.Exit(1)
