@@ -11,7 +11,6 @@ import (
     "strings"
     "strconv"
     "github.com/rcrowley/goagain"
-    // "github.com/rcrowley/go-metrics"
 )
 
 const (
@@ -58,10 +57,10 @@ func (c *Counter) inc(num int) {
 }
 
 type Gauge struct {
-    value   float32
+    value   float64
 }
 
-func (g *Gauge) set(val float32) {
+func (g *Gauge) set(val float64) {
     g.value = val
 }
 
@@ -101,28 +100,30 @@ func NewBucket() (*Bucket) {
 }
 
 func AddCounterSample(bucket *Bucket, key string, val string) {
+    value, _ := strconv.Atoi(val)
     if _, ok := bucket.couters[key]; ok {
         // Exists
-        bucket.couters[key].inc(1)
+        bucket.couters[key].inc(value)
         fmt.Println("Received a Counter (exists)!")
     } else {
         // Not Exist
         bucket.couters[key] = &Counter {
-            count: 1,
+            count: value,
         }
         fmt.Println("Received a Counter (dont exists)!")
     }
 }
 
 func AddGaugeSample(bucket *Bucket, key string, val string) {
+    value, _ := strconv.ParseFloat(val, 64)
     if _, ok := bucket.gauges[key]; ok {
         // Exists
-        bucket.gauges[key].set(2)
+        bucket.gauges[key].set(value)
         fmt.Println("Received a Gauge (exists)!")
     } else {
         // Not Exist
         bucket.gauges[key] = &Gauge {
-            value: 1,
+            value: value,
         }
         fmt.Println("Received a Gauge (dont exists)!")
     }
@@ -199,8 +200,7 @@ func (ds *DataSink) handleFlush() {
     }
 }
 
-func flushBucket(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
-    // Flush counters
+func flushCounters(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
     fmt.Println("Flush Counters...")
     for k, c := range old_bucket.couters {
         msg := k + " " + strconv.Itoa(c.count) + " " + strconv.Itoa(int(epochNow)) + "\n"
@@ -208,8 +208,36 @@ func flushBucket(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
         conn.Write([]byte(msg))
         fmt.Println("Flushed msg: " + msg)
     }
+}
+
+func flushGauges(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
+    fmt.Println("Flush Gauges...")
+    for k, g := range old_bucket.gauges {
+        msg := k + " " + strconv.FormatFloat(g.value, 'f', -1, 64) + " " + strconv.Itoa(int(epochNow)) + "\n"
+        fmt.Println("Flushing msg: " + msg)
+        conn.Write([]byte(msg))
+        fmt.Println("Flushed msg: " + msg)
+    }
+}
+
+func flushTimers(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
+
+}
+
+func flushHistograms(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
+
+}
+
+func flushKVs(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
+
+}
+
+func flushBucket(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
+    // Flush counters
+    go flushCounters(old_bucket, conn, epochNow)
 
     // Flush gauges
+    go flushGauges(old_bucket, conn, epochNow)
 
     // Flush timers
 
@@ -254,15 +282,6 @@ func acceptTCPConn(l *net.TCPListener, ds *DataSink) {
 func handleRequest(conn net.Conn, ds *DataSink) {
     // Close the connection when you're done with it.
     defer conn.Close()
-    // // Make a buffer to hold incoming data.
-    // buf := make([]byte, 1024)
-    // // Read the incoming connection into the buffer.
-    // _, err := conn.Read(buf)
-    // if err != nil {
-    //     fmt.Println("Error reading:", err.Error())
-    // }
-    // // Send a response back to person contacting us.
-    // conn.Write([]byte("Message received."))
 
     r := bufio.NewReaderSize(conn, 4096)
     // DONOT block data processing, keep it go fast.
