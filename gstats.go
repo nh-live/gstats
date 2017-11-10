@@ -9,6 +9,7 @@ import (
     "io"
     "time"
     "strings"
+    "strconv"
     "github.com/rcrowley/goagain"
     // "github.com/rcrowley/go-metrics"
 )
@@ -29,6 +30,9 @@ const (
     TYPE_GAUGE = "g"
     TYPE_TIMER = "ms"
     TYPE_HISTOGRAM = "h"
+
+    // MSG_TEMPLATE
+    // MSG_TEMPLATE = `{{.metric}} {{.value}} {{.timpstamp}}`
 )
 
 /////////////
@@ -54,7 +58,11 @@ func (c *Counter) inc(num int) {
 }
 
 type Gauge struct {
+    value   float32
+}
 
+func (g *Gauge) set(val float32) {
+    g.value = val
 }
 
 type Timer struct {
@@ -107,7 +115,17 @@ func AddCounterSample(bucket *Bucket, key string, val string) {
 }
 
 func AddGaugeSample(bucket *Bucket, key string, val string) {
-
+    if _, ok := bucket.gauges[key]; ok {
+        // Exists
+        bucket.gauges[key].set(2)
+        fmt.Println("Received a Gauge (exists)!")
+    } else {
+        // Not Exist
+        bucket.gauges[key] = &Gauge {
+            value: 1,
+        }
+        fmt.Println("Received a Gauge (dont exists)!")
+    }
 }
 
 func AddTimerSample(bucket *Bucket, key string, val string) {
@@ -152,9 +170,12 @@ func NewDataSink(addr string, flushInterval time.Duration) (*DataSink, error) {
     // Initialize Data Sink
     sink := DataSink{
         conn: conn,
-        flushInterval: flushInterval,
+        flushInterval: flushInterval * time.Second,
         bucket: bucket,
     }
+
+    // Start flush goroutine
+    go sink.handleFlush()
 
     return &sink, nil
 }
@@ -166,20 +187,35 @@ func (ds *DataSink) handleFlush() {
         <- flushTicker.C
         // Time Now
         now := time.Now()
-        epoch_now := now.Unix()
-        fmt.Println(epoch_now)
+        epochNow := now.Unix()
+        fmt.Println(epochNow)
 
         // Swap and buffer
         old_bucket := ds.bucket
         ds.bucket = NewBucket()
 
         // Spawn a goroutine for flushing
-        go flushBucket(old_bucket, ds.conn)
+        go flushBucket(old_bucket, ds.conn, epochNow)
     }
 }
 
-func flushBucket(old_bucket *Bucket, conn *net.TCPConn) {
+func flushBucket(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
+    // Flush counters
+    fmt.Println("Flush Counters...")
+    for k, c := range old_bucket.couters {
+        msg := k + " " + strconv.Itoa(c.count) + " " + strconv.Itoa(int(epochNow)) + "\n"
+        fmt.Println("Flushing msg: " + msg)
+        conn.Write([]byte(msg))
+        fmt.Println("Flushed msg: " + msg)
+    }
 
+    // Flush gauges
+
+    // Flush timers
+
+    // Flush histograms
+
+    // Flush kvs
 }
 
 ///////////////////////////
@@ -274,7 +310,7 @@ func main() {
 
 
     // Initialize Data Sink
-    dataSink, err := NewDataSink(GRAPHITE_ADDR, 60)
+    dataSink, err := NewDataSink(GRAPHITE_ADDR, 10)
 
     // TCP
     // Listen for incoming connections.
