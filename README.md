@@ -1,2 +1,5 @@
 # gstats
-Who Am I ?
+
+Who Am I ?  A mini statd/statsite in Go.
+
+## TODOs
