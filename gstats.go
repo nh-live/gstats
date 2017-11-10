@@ -8,6 +8,7 @@ import (
     "bufio"
     "io"
     "time"
+    "sync"
     "strings"
     "strconv"
     "github.com/rcrowley/goagain"
@@ -81,11 +82,19 @@ type KeyValue struct {
 // Bucket  //
 /////////////
 type Bucket struct {
+    // Data
     couters         map[string]*Counter
     gauges          map[string]*Gauge
     timers          map[string]*Timer
     histograms      map[string]*Histogram
     kvs             map[string]*KeyValue
+
+    // Lock
+    counterLock     sync.RWMutex
+    gaugeLock       sync.RWMutex
+    timerLock       sync.RWMutex
+    histogramLock   sync.RWMutex
+    kvsLock         sync.RWMutex
 }
 
 
