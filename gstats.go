@@ -90,11 +90,11 @@ type Bucket struct {
     kvs             map[string]*KeyValue
 
     // Lock
-    counterLock     sync.RWMutex
-    gaugeLock       sync.RWMutex
-    timerLock       sync.RWMutex
-    histogramLock   sync.RWMutex
-    kvsLock         sync.RWMutex
+    counterLock     sync.Mutex
+    gaugeLock       sync.Mutex
+    timerLock       sync.Mutex
+    histogramLock   sync.Mutex
+    kvsLock         sync.Mutex
 }
 
 
@@ -110,6 +110,10 @@ func NewBucket() (*Bucket) {
 
 func AddCounterSample(bucket *Bucket, key string, val string) {
     value, _ := strconv.Atoi(val)
+
+    bucket.counterLock.Lock()
+    defer bucket.counterLock.Unlock()
+
     if _, ok := bucket.couters[key]; ok {
         // Exists
         bucket.couters[key].inc(value)
@@ -125,6 +129,10 @@ func AddCounterSample(bucket *Bucket, key string, val string) {
 
 func AddGaugeSample(bucket *Bucket, key string, val string) {
     value, _ := strconv.ParseFloat(val, 64)
+
+    bucket.gaugeLock.Lock()
+    defer bucket.gaugeLock.Unlock()
+
     if _, ok := bucket.gauges[key]; ok {
         // Exists
         bucket.gauges[key].set(value)
