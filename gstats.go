@@ -8,12 +8,18 @@ import (
     "bufio"
     "io"
     "time"
+    "flag"
     "sync"
     "strings"
     "strconv"
+    "io/ioutil"
     "github.com/rcrowley/goagain"
+    "github.com/BurntSushi/toml"
 )
 
+/////////////
+// Consts  //
+/////////////
 const (
     // Server Listening Addr
     CONN_HOST = "localhost"
@@ -42,8 +48,54 @@ const (
 func usage() {
     fmt.Fprintln(
         os.Stderr,
-        "Usage: gstats <path-to-config-file>",
+        "Usage: gstats -config=<path-to-config-file>",
     )
+}
+
+/////////////
+// Config  //
+/////////////
+type commonConfig struct {
+    FlushInterval     time.Duration
+    TcpPort           string
+    UdpPort           string
+    GraphiteAddr      string
+    NumBuckets        int64
+}
+
+type Config struct {
+    Common       commonConfig
+    // Put any other configs here...
+}
+
+func NewConfig() *Config {
+    cfg := &Config{
+        Common: commonConfig{
+            FlushInterval: 60,
+            TcpPort: CONN_PORT,
+            UdpPort: UDP_PORT,
+            GraphiteAddr: GRAPHITE_ADDR,
+            NumBuckets: 1,
+        },
+    }
+    return cfg
+}
+
+func ParseConfigFile(file string) (*Config, error) {
+    cfg := NewConfig()
+
+    if file != "" {
+        bytes, err := ioutil.ReadFile(file)
+        if err != nil {
+            return nil, err
+        }
+        body := string(bytes)
+
+        if _, err := toml.Decode(body, cfg); err != nil {
+            return nil, err
+        }
+    }
+    return cfg, nil
 }
 
 //////////////////////
@@ -341,18 +393,28 @@ func handleRequest(conn net.Conn, ds *DataSink) {
 
 func main() {
 
-    // TODO:
-    // Parse Config File...
+    // Command line flags
+    configFile := flag.String("config", "", "config filename")
+    flag.Parse()
 
+    fmt.Println(*configFile)
+    // Parse Config File...
+    cfg, err := ParseConfigFile(*configFile)
+    if err != nil {
+        usage()
+        return
+    }
+
+    fmt.Println(cfg)
 
     // Initialize Data Sink
-    dataSink, err := NewDataSink(GRAPHITE_ADDR, 10)
+    dataSink, err := NewDataSink(cfg.Common.GraphiteAddr, cfg.Common.FlushInterval)
 
     // TCP
     // Listen for incoming connections.
     l, ppid, err := goagain.GetEnvs()
     if nil != err {
-        laddr, err := net.ResolveTCPAddr("tcp", CONN_PORT)
+        laddr, err := net.ResolveTCPAddr("tcp", cfg.Common.TcpPort)
         if nil != err {
             os.Exit(1)
         }
@@ -374,10 +436,10 @@ func main() {
             time.Sleep(10 * time.Millisecond)
         }
     }
-    fmt.Println("TCP Listening on " + CONN_PORT)
+    fmt.Println("TCP Listening on " + cfg.Common.TcpPort)
 
     // UDP
-    udp_addr, err := net.ResolveUDPAddr("udp", UDP_PORT)
+    udp_addr, err := net.ResolveUDPAddr("udp", cfg.Common.UdpPort)
     if nil != err {
         fmt.Println("Errs out when resolving udp server.")
         os.Exit(1)
@@ -386,7 +448,7 @@ func main() {
 
     defer udp_conn.Close()
 
-    fmt.Println("UDP Listening on " + UDP_PORT)
+    fmt.Println("UDP Listening on " + cfg.Common.UdpPort)
     if nil != err {
         fmt.Println("Errs out when starting udp server.")
         os.Exit(1)
