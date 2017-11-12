@@ -61,7 +61,7 @@ type commonConfig struct {
     TcpPort           string
     UdpPort           string
     GraphiteAddr      string
-    NumBuckets        uint32
+    NumBuckets        int
 }
 
 type Config struct {
@@ -109,8 +109,8 @@ func hash(s string) uint32 {
     return h.Sum32()
 }
 
-func getBucket(s string, numBuckets uint32) uint32 {
-    return hash(s) % numBuckets
+func getBucket(s string, numBuckets int) int {
+    return int(hash(s)) % numBuckets
 }
 
 //////////////////////
@@ -231,11 +231,12 @@ func AddKVSample(bucket *Bucket, key string, val string) {
 type DataSink struct {
     conn               *net.TCPConn
     flushInterval      time.Duration
+    numBuckets         int
     // Needs some more design...
-    bucket             *Bucket
+    buckets            []*Bucket
 }
 
-func NewDataSink(addr string, flushInterval time.Duration, numBuckets uint32) (*DataSink, error) {
+func NewDataSink(addr string, flushInterval time.Duration, numBuckets int) (*DataSink, error) {
     // Initialize a Conn to backend server
     tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
     if err != nil {
@@ -250,13 +251,17 @@ func NewDataSink(addr string, flushInterval time.Duration, numBuckets uint32) (*
     }
 
     // Initialize a new Bucket
-    bucket := NewBucket()
+    buckets := make([]*Bucket, numBuckets)
+    for i := 0; i < numBuckets; i++ {
+        buckets[i] = NewBucket()
+    }
 
     // Initialize Data Sink
     sink := DataSink{
         conn: conn,
         flushInterval: flushInterval * time.Second,
-        bucket: bucket,
+        numBuckets: numBuckets,
+        buckets: buckets,
     }
 
     // Start flush goroutine
@@ -276,11 +281,20 @@ func (ds *DataSink) handleFlush() {
         fmt.Println(epochNow)
 
         // Swap and buffer
-        old_bucket := ds.bucket
-        ds.bucket = NewBucket()
+        old_buckets := ds.buckets
+
+        buckets := make([]*Bucket, ds.numBuckets)
+        for i := 0; i < ds.numBuckets; i++ {
+            buckets[i] = NewBucket()
+        }
+
+        ds.buckets = buckets
 
         // Spawn a goroutine for flushing
-        go flushBucket(old_bucket, ds.conn, epochNow)
+        for i := 0; i < ds.numBuckets; i++ {
+            fmt.Println("Flushing Bucket " + strconv.Itoa(i))
+            go flushBucket(old_buckets[i], ds.conn, epochNow)
+        }
     }
 }
 
@@ -384,18 +398,21 @@ func handleRequest(conn net.Conn, ds *DataSink) {
         fmt.Println("Value: " + value)
         fmt.Println("Type: " + msgType)
 
+        // Calculate hash key
+        hashKey := getBucket(key, ds.numBuckets)
+
         // Feed into data buckets pool
         switch msgType {
             case TYPE_COUNTER:
-                AddCounterSample(ds.bucket, key, value)
+                AddCounterSample(ds.buckets[hashKey], key, value)
             case TYPE_HISTOGRAM:
-                AddHistogramSample(ds.bucket, key, value)
+                AddHistogramSample(ds.buckets[hashKey], key, value)
             case TYPE_TIMER:
-                AddTimerSample(ds.bucket, key, value)
+                AddTimerSample(ds.buckets[hashKey], key, value)
             case TYPE_KV:
-                AddKVSample(ds.bucket, key, value)
+                AddKVSample(ds.buckets[hashKey], key, value)
             case TYPE_GAUGE:
-                AddGaugeSample(ds.bucket, key, value)
+                AddGaugeSample(ds.buckets[hashKey], key, value)
         }
 
         fmt.Println("Processed!")
