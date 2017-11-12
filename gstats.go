@@ -13,6 +13,7 @@ import (
     "strings"
     "strconv"
     "io/ioutil"
+    "hash/fnv"
     "github.com/rcrowley/goagain"
     "github.com/BurntSushi/toml"
 )
@@ -60,7 +61,7 @@ type commonConfig struct {
     TcpPort           string
     UdpPort           string
     GraphiteAddr      string
-    NumBuckets        int64
+    NumBuckets        uint32
 }
 
 type Config struct {
@@ -96,6 +97,20 @@ func ParseConfigFile(file string) (*Config, error) {
         }
     }
     return cfg, nil
+}
+
+////////////////////
+// Hash Function  //
+////////////////////
+
+func hash(s string) uint32 {
+    h := fnv.New32a()
+    h.Write([]byte(s))
+    return h.Sum32()
+}
+
+func getBucket(s string, numBuckets uint32) uint32 {
+    return hash(s) % numBuckets
 }
 
 //////////////////////
@@ -220,7 +235,7 @@ type DataSink struct {
     bucket             *Bucket
 }
 
-func NewDataSink(addr string, flushInterval time.Duration) (*DataSink, error) {
+func NewDataSink(addr string, flushInterval time.Duration, numBuckets uint32) (*DataSink, error) {
     // Initialize a Conn to backend server
     tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
     if err != nil {
@@ -397,7 +412,6 @@ func main() {
     configFile := flag.String("config", "", "config filename")
     flag.Parse()
 
-    fmt.Println(*configFile)
     // Parse Config File...
     cfg, err := ParseConfigFile(*configFile)
     if err != nil {
@@ -405,10 +419,8 @@ func main() {
         return
     }
 
-    fmt.Println(cfg)
-
     // Initialize Data Sink
-    dataSink, err := NewDataSink(cfg.Common.GraphiteAddr, cfg.Common.FlushInterval)
+    dataSink, err := NewDataSink(cfg.Common.GraphiteAddr, cfg.Common.FlushInterval, cfg.Common.NumBuckets)
 
     // TCP
     // Listen for incoming connections.
