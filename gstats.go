@@ -16,6 +16,8 @@ import (
     "hash/fnv"
     "github.com/rcrowley/goagain"
     "github.com/BurntSushi/toml"
+    "github.com/bmizerany/perks/quantile"
+    "github.com/bmizerany/perks/histogram"
 )
 
 /////////////
@@ -116,6 +118,8 @@ func getBucket(s string, numBuckets int) int {
 //////////////////////
 // Metric Types     //
 //////////////////////
+
+// Counter
 type Counter struct {
     count   int
 }
@@ -124,6 +128,7 @@ func (c *Counter) inc(num int) {
     c.count = c.count + num
 }
 
+// Gauge
 type Gauge struct {
     value   float64
 }
@@ -132,14 +137,26 @@ func (g *Gauge) set(val float64) {
     g.value = val
 }
 
+// Timer
 type Timer struct {
-
+    targets  []float64
+    stream   *quantile.Stream
 }
 
+func NewTimer(priors []float64) (t *Timer){
+    return &Timer {
+        targets: priors,
+        stream: quantile.NewTargeted(priors...),
+    }
+}
+
+// Histogram
 type Histogram struct {
-
+    maxBins     int
+    histogram   *histogram.Histogram
 }
 
+// Key Value
 type KeyValue struct {
 
 }
