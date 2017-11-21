@@ -40,9 +40,15 @@ const (
     TYPE_TIMER = "ms"
     TYPE_HISTOGRAM = "h"
 
+    // Config for Metric Config
+    HISTOGRAM_MAX_BINS = 5
+
+
     // MSG_TEMPLATE
     // MSG_TEMPLATE = `{{.metric}} {{.value}} {{.timpstamp}}`
 )
+
+var TIMER_TARGETS = []float64{0.50, 0.90, 0.99}
 
 /////////////
 // Usage   //
@@ -64,6 +70,8 @@ type commonConfig struct {
     UdpPort           string
     GraphiteAddr      string
     NumBuckets        int
+    TimerTargets      []float64
+    HistogramMaxBins  int
 }
 
 type Config struct {
@@ -79,6 +87,8 @@ func NewConfig() *Config {
             UdpPort: UDP_PORT,
             GraphiteAddr: GRAPHITE_ADDR,
             NumBuckets: 1,
+            HistogramMaxBins: HISTOGRAM_MAX_BINS,
+            TimerTargets: TIMER_TARGETS,
         },
     }
     return cfg
@@ -139,21 +149,24 @@ func (g *Gauge) set(val float64) {
 
 // Timer
 type Timer struct {
-    targets  []float64
     stream   *quantile.Stream
 }
 
 func NewTimer(priors []float64) (t *Timer){
     return &Timer {
-        targets: priors,
         stream: quantile.NewTargeted(priors...),
     }
 }
 
 // Histogram
 type Histogram struct {
-    maxBins     int
     histogram   *histogram.Histogram
+}
+
+func NewHistogram(MaxBins int) (h *Histogram) {
+    return &Histogram {
+        histogram: histogram.New(MaxBins),
+    }
 }
 
 // Key Value
@@ -179,16 +192,24 @@ type Bucket struct {
     timerLock       sync.Mutex
     histogramLock   sync.Mutex
     kvsLock         sync.Mutex
+
+    // Configs
+    maxBins         int
+    timerTargets    []float64
 }
 
 
-func NewBucket() (*Bucket) {
+func NewBucket(maxBins int, timerTargets []float64) (*Bucket) {
     return &Bucket{
         couters: make(map[string]*Counter),
         gauges: make(map[string]*Gauge),
         timers: make(map[string]*Timer),
         histograms: make(map[string]*Histogram),
         kvs: make(map[string]*KeyValue),
+
+        // Configs
+        maxBins: maxBins,
+        timerTargets: timerTargets,
     }
 }
 
@@ -231,11 +252,39 @@ func AddGaugeSample(bucket *Bucket, key string, val string) {
 }
 
 func AddTimerSample(bucket *Bucket, key string, val string) {
+    value, _ := strconv.ParseFloat(val, 64)
 
+    bucket.timerLock.Lock()
+    defer bucket.timerLock.Unlock()
+
+    if _, ok := bucket.timers[key]; ok {
+        // Exists
+        bucket.timers[key].stream.Insert(value)
+        fmt.Println("Received a Timer exists!")
+    } else{
+        // Not Exists
+        bucket.timers[key] = NewTimer(bucket.timerTargets)
+        bucket.timers[key].stream.Insert(value)
+        fmt.Println("Received a Timer (dont exists)!")
+    }
 }
 
 func AddHistogramSample(bucket *Bucket, key string, val string) {
+    value, _ := strconv.ParseFloat(val, 64)
 
+    bucket.histogramLock.Lock()
+    defer bucket.histogramLock.Unlock()
+
+    if _, ok := bucket.histograms[key]; ok {
+        // Exists
+        bucket.histograms[key].histogram.Insert(value)
+        fmt.Println("Received a Historam exists!")
+    } else{
+        // Not Exists
+        bucket.histograms[key] = NewHistogram(bucket.maxBins)
+        bucket.histograms[key].histogram.Insert(value)
+        fmt.Println("Received a Historam (dont exists)!")
+    }
 }
 
 func AddKVSample(bucket *Bucket, key string, val string) {
@@ -249,11 +298,13 @@ type DataSink struct {
     conn               *net.TCPConn
     flushInterval      time.Duration
     numBuckets         int
+    maxBins            int
+    timerTargets       []float64
     // Needs some more design...
     buckets            []*Bucket
 }
 
-func NewDataSink(addr string, flushInterval time.Duration, numBuckets int) (*DataSink, error) {
+func NewDataSink(addr string, flushInterval time.Duration, numBuckets int, maxBins int, timerTargets []float64) (*DataSink, error) {
     // Initialize a Conn to backend server
     tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
     if err != nil {
@@ -270,7 +321,7 @@ func NewDataSink(addr string, flushInterval time.Duration, numBuckets int) (*Dat
     // Initialize a new Bucket
     buckets := make([]*Bucket, numBuckets)
     for i := 0; i < numBuckets; i++ {
-        buckets[i] = NewBucket()
+        buckets[i] = NewBucket(maxBins, timerTargets)
     }
 
     // Initialize Data Sink
@@ -279,6 +330,8 @@ func NewDataSink(addr string, flushInterval time.Duration, numBuckets int) (*Dat
         flushInterval: flushInterval * time.Second,
         numBuckets: numBuckets,
         buckets: buckets,
+        maxBins: maxBins,
+        timerTargets: timerTargets,
     }
 
     // Start flush goroutine
@@ -302,7 +355,7 @@ func (ds *DataSink) handleFlush() {
 
         buckets := make([]*Bucket, ds.numBuckets)
         for i := 0; i < ds.numBuckets; i++ {
-            buckets[i] = NewBucket()
+            buckets[i] = NewBucket(ds.maxBins, ds.timerTargets)
         }
 
         ds.buckets = buckets
@@ -336,11 +389,33 @@ func flushGauges(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
 }
 
 func flushTimers(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
-
+    fmt.Println("Flush Timers...")
+    for k, t := range old_bucket.timers {
+        for _, p := range old_bucket.timerTargets {
+            fmt.Println(p)
+            metric_key := k + ".p" + strconv.Itoa(int(p * 100))
+            value := t.stream.Query(p)
+            msg := metric_key + " " + strconv.FormatFloat(value, 'f', -1, 64) + " " + strconv.Itoa(int(epochNow)) + "\n"
+            fmt.Println("Flushing msg: " + msg)
+            conn.Write([]byte(msg))
+            fmt.Println("Flushed msg: " + msg)
+        }
+    }
 }
 
 func flushHistograms(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
-
+    fmt.Println("Flush Histograms...")
+    for k, h := range old_bucket.histograms {
+        for i, bin := range h.histogram.Bins() {
+            // Flush Histogram Count
+            metric_key := k + "." + strconv.Itoa(i)
+            count := bin.Count
+            msg := metric_key + " " + strconv.Itoa(count) + " " + strconv.Itoa(int(epochNow)) + "\n"
+            fmt.Println("Flushing msg: " + msg)
+            conn.Write([]byte(msg))
+            fmt.Println("Flushed msg: " + msg)
+        }
+    }
 }
 
 func flushKVs(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
@@ -355,8 +430,10 @@ func flushBucket(old_bucket *Bucket, conn *net.TCPConn, epochNow int64) {
     go flushGauges(old_bucket, conn, epochNow)
 
     // Flush timers
+    go flushTimers(old_bucket, conn, epochNow)
 
     // Flush histograms
+    go flushHistograms(old_bucket, conn, epochNow)
 
     // Flush kvs
 }
@@ -452,9 +529,8 @@ func main() {
         usage()
         return
     }
-
     // Initialize Data Sink
-    dataSink, err := NewDataSink(cfg.Common.GraphiteAddr, cfg.Common.FlushInterval, cfg.Common.NumBuckets)
+    dataSink, err := NewDataSink(cfg.Common.GraphiteAddr, cfg.Common.FlushInterval, cfg.Common.NumBuckets, cfg.Common.HistogramMaxBins, cfg.Common.TimerTargets)
 
     // TCP
     // Listen for incoming connections.
